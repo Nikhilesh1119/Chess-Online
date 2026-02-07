@@ -29,6 +29,10 @@ const io = new Server(httpServer, {
 
 const sessions = new Map();
 
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 function createSessionId() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let id = "";

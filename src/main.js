@@ -26,7 +26,7 @@ const PIECE_IMAGES = {
   b: { k: kingB, q: queenB, r: rookB, b: bishopB, n: knightB, p: pawnB }
 };
 
-const SERVER_URL = import.meta.env.PROD ? window.location.origin : import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
 
 const app = document.querySelector("#app");
 const savedTheme = localStorage.getItem("chess-theme") || "classic";
