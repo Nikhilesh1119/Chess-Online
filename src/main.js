@@ -1,122 +1,20 @@
 import "./style.css";
-import { Chess } from "chess.js";
 import { io } from "socket.io-client";
-import kingW from "./assets/king_w.png";
-import queenW from "./assets/queen_w.png";
-import rookW from "./assets/rook_w.png";
-import bishopW from "./assets/bishop_w.png";
-import knightW from "./assets/knight_w.png";
-import pawnW from "./assets/pawn_w.png";
-import kingB from "./assets/king_b.png";
-import queenB from "./assets/queen_b.png";
-import rookB from "./assets/rook_b.png";
-import bishopB from "./assets/bishop_b.png";
-import knightB from "./assets/knight_b.png";
-import pawnB from "./assets/pawn_b.png";
-
-const FILES = "abcdefgh";
-const THEMES = [
-  { id: "classic", name: "Classic Wood" },
-  { id: "emerald", name: "Emerald" },
-  { id: "midnight", name: "Midnight Slate" }
-];
-
-const PIECE_IMAGES = {
-  w: { k: kingW, q: queenW, r: rookW, b: bishopW, n: knightW, p: pawnW },
-  b: { k: kingB, q: queenB, r: rookB, b: bishopB, n: knightB, p: pawnB }
-};
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
+import { Chess } from "chess.js";
+import { FILES, PIECE_IMAGES, SERVER_URL, THEMES } from "./constants";
+import { pickEngineMove } from "./engine";
+import { createInitialState, normalizeDifficulty } from "./state";
+import { createAppLayout } from "./template";
 
 const app = document.querySelector("#app");
+
 const savedTheme = localStorage.getItem("chess-theme") || "classic";
+const validTheme = THEMES.some((theme) => theme.id === savedTheme) ? savedTheme : "classic";
+const savedDifficulty = normalizeDifficulty(localStorage.getItem("engine-difficulty") || 5);
 
-const state = {
-  theme: THEMES.some((t) => t.id === savedTheme) ? savedTheme : "classic",
-  mode: "local",
-  chess: new Chess(),
-  selected: null,
-  selectedMoves: [],
-  engineTimer: null,
-  promotionPending: null,
-  socket: null,
-  sessionId: "",
-  myColor: null,
-  online: null,
-  notice: ""
-};
+const state = createInitialState(validTheme, savedDifficulty);
 
-app.innerHTML = `
-  <main class="mx-auto grid w-full max-w-7xl gap-6 p-3 md:grid-cols-[auto_360px] md:p-8">
-    <section class="panel-shell rounded-3xl border p-4 shadow-2xl md:p-5">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 class="font-title text-3xl leading-tight">Vite Chess Arena</h1>
-          <p class="mt-1 font-body text-sm opacity-85">Play local, vs engine, or online session multiplayer.</p>
-        </div>
-        <span id="mode-chip" class="badge-chip">Local</span>
-      </div>
-
-      <div class="board-area rounded-2xl p-3">
-        <div class="board-wrap">
-          <div id="rank-labels" class="rank-labels" aria-hidden="true"></div>
-          <div>
-            <div id="board" class="chess-board" aria-label="Chess board"></div>
-            <div id="file-labels" class="file-labels" aria-hidden="true"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <aside class="panel-shell rounded-3xl border p-4 shadow-2xl md:p-5">
-      <h2 class="font-title text-2xl">Control Panel</h2>
-      <p id="status" class="mt-2 min-h-16 font-body text-sm"></p>
-      <p id="notice" class="min-h-6 font-body text-xs text-emerald-800"></p>
-
-      <label class="mt-2 block font-body text-sm" for="mode-select">Mode</label>
-      <select id="mode-select" class="mt-1 w-full rounded-xl border px-3 py-2 font-body text-sm">
-        <option value="local">Local 2 Player</option>
-        <option value="engine">Play vs Engine</option>
-        <option value="online">Online Session</option>
-      </select>
-
-      <label class="mt-2 block font-body text-sm" for="theme-select">Theme</label>
-      <select id="theme-select" class="mt-1 w-full rounded-xl border px-3 py-2 font-body text-sm"></select>
-
-      <section id="online-controls" class="mt-3 rounded-xl border p-3 hidden">
-        <h3 class="font-title text-base">Session Multiplayer</h3>
-        <div class="mt-2 flex gap-2">
-          <button id="create-session" class="rounded-full px-3 py-1.5 font-body text-xs font-semibold text-white">Create Session</button>
-          <button id="join-session" class="rounded-full px-3 py-1.5 font-body text-xs font-semibold text-white">Join</button>
-        </div>
-        <input id="session-input" class="mt-2 w-full rounded-lg border px-3 py-2 font-body text-sm uppercase" placeholder="Enter session code" maxlength="6" />
-        <p id="session-meta" class="mt-2 font-body text-xs"></p>
-      </section>
-
-      <div class="mb-4 mt-3 flex gap-2">
-        <button id="new-game" class="rounded-full px-4 py-2 font-body text-sm font-semibold text-white transition">New Game</button>
-      </div>
-
-      <h3 class="font-title text-lg">Moves Notation</h3>
-      <ol id="move-list" class="mt-2 max-h-[350px] list-decimal overflow-auto pl-5 font-body text-sm"></ol>
-    </aside>
-  </main>
-
-  <div id="promotion-modal" class="promo-overlay hidden" role="dialog" aria-modal="true" aria-label="Choose promotion piece">
-    <div class="promo-card">
-      <h4 class="font-title text-xl">Choose Promotion</h4>
-      <div id="promo-choices" class="promo-choices"></div>
-    </div>
-  </div>
-
-  <div id="game-end-modal" class="end-overlay hidden" role="dialog" aria-modal="true" aria-label="Game over">
-    <div class="end-card">
-      <h4 class="font-title text-2xl">Game Over</h4>
-      <p id="end-message" class="mt-2 font-body text-sm"></p>
-      <button id="restart-game" class="mt-4 rounded-full px-4 py-2 font-body text-sm font-semibold text-white">Restart Game</button>
-    </div>
-  </div>
-`;
+app.innerHTML = createAppLayout(state.engineDifficulty);
 
 const boardEl = document.querySelector("#board");
 const rankLabelsEl = document.querySelector("#rank-labels");
@@ -127,6 +25,9 @@ const themeSelect = document.querySelector("#theme-select");
 const modeSelect = document.querySelector("#mode-select");
 const modeChip = document.querySelector("#mode-chip");
 const newGameBtn = document.querySelector("#new-game");
+const engineControls = document.querySelector("#engine-controls");
+const engineDifficultySelect = document.querySelector("#engine-difficulty");
+const engineLevelValue = document.querySelector("#engine-level-value");
 const onlineControls = document.querySelector("#online-controls");
 const createSessionBtn = document.querySelector("#create-session");
 const joinSessionBtn = document.querySelector("#join-session");
@@ -141,11 +42,25 @@ const restartGameBtn = document.querySelector("#restart-game");
 
 themeSelect.innerHTML = THEMES.map((theme) => `<option value="${theme.id}">${theme.name}</option>`).join("");
 themeSelect.value = state.theme;
+engineDifficultySelect.value = String(state.engineDifficulty);
+updateEngineDifficultyLabel();
 
 themeSelect.addEventListener("change", () => {
   state.theme = themeSelect.value;
   localStorage.setItem("chess-theme", state.theme);
   applyTheme();
+});
+
+engineDifficultySelect.addEventListener("change", () => {
+  state.engineDifficulty = normalizeDifficulty(engineDifficultySelect.value);
+  engineDifficultySelect.value = String(state.engineDifficulty);
+  localStorage.setItem("engine-difficulty", String(state.engineDifficulty));
+  updateEngineDifficultyLabel();
+  clearTimers();
+  if (state.mode === "engine") {
+    maybeEngineTurn();
+    renderStatus();
+  }
 });
 
 modeSelect.addEventListener("change", () => {
@@ -175,12 +90,12 @@ restartGameBtn.addEventListener("click", () => {
 
 createSessionBtn.addEventListener("click", async () => {
   try {
-    const res = await fetch(`${SERVER_URL}/api/sessions`, { method: "POST" });
-    const data = await res.json();
+    const response = await fetch(`${SERVER_URL}/api/sessions`, { method: "POST" });
+    const data = await response.json();
     sessionInput.value = data.sessionId;
     joinOnlineSession(data.sessionId);
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error(error);
     setNotice("Could not create session. Check server.");
   }
 });
@@ -206,6 +121,10 @@ boardEl.addEventListener("click", (event) => {
 applyTheme();
 switchMode("local");
 
+function updateEngineDifficultyLabel() {
+  engineLevelValue.textContent = String(state.engineDifficulty);
+}
+
 function applyTheme() {
   document.body.classList.remove("theme-classic", "theme-emerald", "theme-midnight");
   document.body.classList.add(`theme-${state.theme}`);
@@ -224,6 +143,7 @@ function switchMode(mode) {
     teardownOnline();
     state.chess = new Chess();
     modeChip.textContent = "Local";
+    engineControls.classList.add("hidden");
     onlineControls.classList.add("hidden");
   }
 
@@ -231,12 +151,14 @@ function switchMode(mode) {
     teardownOnline();
     state.chess = new Chess();
     modeChip.textContent = "Engine";
+    engineControls.classList.remove("hidden");
     onlineControls.classList.add("hidden");
   }
 
   if (mode === "online") {
     state.chess = new Chess();
     modeChip.textContent = "Online";
+    engineControls.classList.add("hidden");
     onlineControls.classList.remove("hidden");
     ensureSocket();
   }
@@ -344,6 +266,7 @@ function resetLocalGame() {
 }
 
 function clearTimers() {
+  state.engineSearchToken += 1;
   if (state.engineTimer) {
     clearTimeout(state.engineTimer);
     state.engineTimer = null;
@@ -380,7 +303,7 @@ function handleSquareClick(square) {
   }
 
   if (state.selected) {
-    const candidates = state.selectedMoves.filter((m) => m.to === square);
+    const candidates = state.selectedMoves.filter((move) => move.to === square);
     if (candidates.length > 0) {
       if (candidates.length > 1) {
         showPromotionModal(candidates);
@@ -398,6 +321,7 @@ function handleSquareClick(square) {
     state.selected = null;
     state.selectedMoves = [];
   }
+
   render();
 }
 
@@ -475,97 +399,30 @@ function maybeEngineTurn() {
     return;
   }
 
-  state.engineTimer = setTimeout(() => {
-    const best = pickEngineMove(state.chess, 2);
-    if (!best) {
+  const searchToken = state.engineSearchToken + 1;
+  state.engineSearchToken = searchToken;
+  const thinkDelay = Math.max(100, 500 - state.engineDifficulty * 30);
+  state.engineTimer = setTimeout(async () => {
+    if (searchToken !== state.engineSearchToken) {
       return;
     }
-    state.chess.move(best);
-    render();
-    if (state.chess.isGameOver()) {
-      showGameEndModal(getGameOverMessage());
-    }
-  }, 350);
-}
 
-function pickEngineMove(chess, depth) {
-  const moves = chess.moves({ verbose: true });
-  if (moves.length === 0) {
-    return null;
-  }
-
-  let best = null;
-  let bestScore = Infinity;
-
-  for (const move of moves) {
-    chess.move(move);
-    const score = search(chess, depth - 1, -Infinity, Infinity, true);
-    chess.undo();
-    if (score < bestScore) {
-      bestScore = score;
-      best = move;
-    }
-  }
-
-  return best;
-}
-
-function search(chess, depth, alpha, beta, maximizing) {
-  if (depth === 0 || chess.isGameOver()) {
-    return evaluateBoard(chess);
-  }
-
-  const moves = chess.moves({ verbose: true });
-  if (maximizing) {
-    let value = -Infinity;
-    for (const move of moves) {
-      chess.move(move);
-      value = Math.max(value, search(chess, depth - 1, alpha, beta, false));
-      chess.undo();
-      alpha = Math.max(alpha, value);
-      if (alpha >= beta) {
-        break;
+    try {
+      const bestMove = await pickEngineMove(state.chess, state.engineDifficulty);
+      if (!bestMove || searchToken !== state.engineSearchToken) {
+        return;
       }
-    }
-    return value;
-  }
 
-  let value = Infinity;
-  for (const move of moves) {
-    chess.move(move);
-    value = Math.min(value, search(chess, depth - 1, alpha, beta, true));
-    chess.undo();
-    beta = Math.min(beta, value);
-    if (alpha >= beta) {
-      break;
-    }
-  }
-  return value;
-}
-
-function evaluateBoard(chess) {
-  if (chess.isCheckmate()) {
-    return chess.turn() === "w" ? -99999 : 99999;
-  }
-  if (chess.isDraw()) {
-    return 0;
-  }
-
-  const values = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
-  let score = 0;
-  const board = chess.board();
-
-  for (const rank of board) {
-    for (const piece of rank) {
-      if (!piece) {
-        continue;
+      state.chess.move(bestMove);
+      render();
+      if (state.chess.isGameOver()) {
+        showGameEndModal(getGameOverMessage());
       }
-      const v = values[piece.type];
-      score += piece.color === "w" ? v : -v;
+    } catch (error) {
+      console.error(error);
+      setNotice("Engine move failed. Try another move.");
     }
-  }
-
-  return score;
+  }, thinkDelay);
 }
 
 function render() {
@@ -573,7 +430,7 @@ function render() {
   renderCoordinateLabels();
 
   const board = state.chess.board();
-  const selected = state.selected;
+  const selectedSquare = state.selected;
   const targetMap = new Map();
 
   for (const move of state.selectedMoves) {
@@ -582,23 +439,23 @@ function render() {
 
   const inCheckSquare = findKingSquare(state.chess, state.chess.turn());
   const checkActive = state.chess.isCheck();
-
   const flipped = shouldFlipBoard();
 
-  for (let viewR = 0; viewR < 8; viewR += 1) {
-    for (let viewC = 0; viewC < 8; viewC += 1) {
-      const boardR = flipped ? 7 - viewR : viewR;
-      const boardC = flipped ? 7 - viewC : viewC;
-      const square = `${FILES[boardC]}${8 - boardR}`;
-      const piece = board[boardR][boardC];
-      const isLight = (boardR + boardC) % 2 === 0;
+  for (let viewRow = 0; viewRow < 8; viewRow += 1) {
+    for (let viewCol = 0; viewCol < 8; viewCol += 1) {
+      const boardRow = flipped ? 7 - viewRow : viewRow;
+      const boardCol = flipped ? 7 - viewCol : viewCol;
+      const square = `${FILES[boardCol]}${8 - boardRow}`;
+      const piece = board[boardRow][boardCol];
+      const isLight = (boardRow + boardCol) % 2 === 0;
+
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = ["chess-square", isLight ? "sq-light" : "sq-dark"].join(" ");
       btn.dataset.square = square;
       btn.setAttribute("aria-label", square);
 
-      if (selected === square) {
+      if (selectedSquare === square) {
         btn.classList.add("sq-selected");
       }
       if (targetMap.has(square)) {
@@ -646,7 +503,7 @@ function renderStatus() {
   }
 
   if (state.mode === "engine") {
-    status += " You play White.";
+    status += ` You play White. Engine level ${state.engineDifficulty}/10.`;
   }
   if (state.mode === "online") {
     status += state.myColor ? ` You are ${state.myColor === "w" ? "White" : "Black"}.` : " Join a session to play.";
@@ -729,11 +586,11 @@ function hideGameEndModal() {
 
 function findKingSquare(chess, color) {
   const board = chess.board();
-  for (let r = 0; r < 8; r += 1) {
-    for (let c = 0; c < 8; c += 1) {
-      const piece = board[r][c];
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const piece = board[row][col];
       if (piece && piece.type === "k" && piece.color === color) {
-        return `${FILES[c]}${8 - r}`;
+        return `${FILES[col]}${8 - row}`;
       }
     }
   }

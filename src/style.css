@@ -214,6 +214,17 @@ button#undo {
   background: rgba(255, 255, 255, 0.35);
 }
 
+#engine-controls {
+  border-color: var(--panel-border);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#engine-difficulty {
+  color: var(--text-1);
+  border-color: var(--panel-border);
+  background: rgba(255, 255, 255, 0.75);
+}
+
 .promo-overlay {
   position: fixed;
   inset: 0;

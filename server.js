@@ -202,7 +202,6 @@ if (existsSync(distPath)) {
   });
 }
 
-const port = Number(process.env.PORT || 3001);
-httpServer.listen(port, () => {
-  console.log(`Chess server running on http://localhost:${port}`);
+httpServer.listen(3001, () => {
+  console.log(`Chess server running on http://localhost:3001`);
 });
